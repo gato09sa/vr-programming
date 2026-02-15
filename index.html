@@ -2,167 +2,136 @@
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <title>Quest Puzzle: print("Hello World")</title>
+  <title>Quest 3 Puzzle - Manos (pinch) + Controles</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+
+  <!-- A-Frame -->
+  <script src="https://aframe.io/releases/1.7.1/aframe.min.js"></script>
 
   <script>
-    const WORLD_UP = new THREE.Vector3(0, 1, 0);
+    // ======================
+    // Helpers
+    // ======================
+    function getText(blockEl) { return blockEl.getAttribute("data-text"); }
 
-    function getText(el) { return el.getAttribute("data-text"); }
+    function findBlockEntityFromHit(el) {
+      // Si el rayo pega en un hijo (texto/plane), subimos al padre con code-block
+      let cur = el;
+      for (let i = 0; i < 10 && cur; i++) {
+        if (cur.hasAttribute && cur.hasAttribute("code-block")) return cur;
+        cur = cur.parentElement;
+      }
+      return null;
+    }
 
-    // --- Grab con rayo: gatillo para agarrar el objeto intersectado
-    AFRAME.registerComponent("ray-grabber", {
-      schema: { hand: { type: "string", default: "right" } },
-      init() {
-        this.raycaster = this.el.components.raycaster;
-        this.grabbedEl = null;
-        this.originalParent = null;
+    function worldPosOf(el) {
+      const v = new THREE.Vector3();
+      el.object3D.getWorldPosition(v);
+      return v;
+    }
 
-        // gatillo (Oculus/Quest controllers)
-        this.el.addEventListener("triggerdown", () => this.tryGrab());
-        this.el.addEventListener("triggerup", () => this.release());
-
-        // fallback (algunos setups disparan gripdown)
-        this.el.addEventListener("gripdown", () => this.tryGrab());
-        this.el.addEventListener("gripup", () => this.release());
-      },
-
-      tryGrab() {
-        if (this.grabbedEl) return;
-        if (!this.raycaster) return;
-
-        const hits = this.raycaster.intersections;
-        if (!hits || hits.length === 0) return;
-
-        const hitEl = hits[0].object.el;
-        if (!hitEl || !hitEl.hasAttribute("code-block")) return;
-
-        this.grabbedEl = hitEl;
-        this.originalParent = hitEl.parentNode;
-
-        // Adjuntar al controlador (se mueve contigo)
-        this.el.object3D.add(hitEl.object3D);
-        hitEl.object3D.position.set(0, 0, -0.18); // delante del control
-        hitEl.object3D.rotation.set(0, 0, 0);
-
-        hitEl.emit("grabbed");
-      },
-
-      release() {
-        if (!this.grabbedEl) return;
-
-        const el = this.grabbedEl;
-
-        // Si está cerca de una ranura, la ranura lo “absorbe”.
-        // Si no, vuelve a la mesa.
-        const gm = document.querySelector("[game-manager]").components["game-manager"];
-        const droppedInto = gm.tryDropIntoNearestSlot(el);
-
-        if (!droppedInto) {
-          // vuelve a la mesa a su homepos
-          const table = document.querySelector("#table");
-          table.appendChild(el);
-          el.setAttribute("position", el.getAttribute("data-homepos"));
-          el.setAttribute("rotation", "0 0 0");
-          el.setAttribute("material", "color: #2563eb; roughness: 0.4");
-        }
-
-        el.emit("released");
-        this.grabbedEl = null;
-        this.originalParent = null;
+    // ======================
+    // Billboard: texto siempre mirando a la cámara
+    // ======================
+    AFRAME.registerComponent("billboard", {
+      init() { this.cam = document.querySelector("#cam"); },
+      tick() {
+        if (!this.cam) return;
+        this.el.object3D.lookAt(this.cam.object3D.position);
       }
     });
 
-    // --- Slot: almacena 1 bloque
+    // ======================
+    // Slot (ranura)
+    // ======================
     AFRAME.registerComponent("slot", {
       schema: { index: { type: "int" } },
-      init() {
-        this.filled = false;
-      }
+      init() { this.filled = false; }
     });
 
-    // --- Game manager: explicación + validación + “console”
+    // ======================
+    // Game Manager (lógica + tutor)
+    // ======================
     AFRAME.registerComponent("game-manager", {
       init() {
-        this.steps = ['print(', '"Hello World"', ')'];
-        this.slotState = [null, null, null];
+        this.expected = ['print(', '"Hello World"', ')'];
+        this.state = [null, null, null];
 
         this.uiTitle = document.querySelector("#uiTitle");
         this.uiBody  = document.querySelector("#uiBody");
-        this.console = document.querySelector("#console");
         this.program = document.querySelector("#programLine");
+        this.console = document.querySelector("#console");
         this.badge   = document.querySelector("#badge");
 
         this.setUI(
-          "Nivel 1: arma tu primer programa",
-          "Usa el rayo (laser) del control y el gatillo para agarrar.\n" +
-          "Orden correcto:\nprint(  \"Hello World\"  )\n\n" +
-          "Coloca cada bloque en su ranura."
+          "Nivel 1: arma print(\"Hello World\")",
+          "✅ Puedes jugar con MANOS (pinch) o con CONTROLES.\n\n" +
+          "MANOS: pellizca (índice+pulgar) para agarrar/soltar.\n" +
+          "CONTROLES: rayo + gatillo para agarrar/soltar.\n\n" +
+          "Orden:\n1) print(\n2) \"Hello World\"\n3) )"
         );
         this.setConsole("> Consola lista.\n");
         this.renderProgram();
       },
 
-      setUI(title, body) {
-        this.uiTitle.setAttribute("text", "value", title);
-        this.uiBody.setAttribute("text", "value", body);
+      setUI(t, b) {
+        this.uiTitle.setAttribute("text", "value", t);
+        this.uiBody.setAttribute("text", "value", b);
       },
-
-      setConsole(text) { this.console.setAttribute("text", "value", text); },
+      setConsole(v) { this.console.setAttribute("text", "value", v); },
       addConsole(line) {
         const cur = this.console.getAttribute("text").value;
         this.setConsole(cur + line);
       },
 
-      expectedForIndex(i){ return this.steps[i]; },
-
-      // Busca ranura más cercana; si está dentro del radio y no ocupada, encaja.
-      tryDropIntoNearestSlot(blockEl) {
+      renderProgram() {
         const slots = Array.from(document.querySelectorAll("[slot]"));
-        const blockPos = new THREE.Vector3();
-        blockEl.object3D.getWorldPosition(blockPos);
+        const parts = [];
+        for (let i = 0; i < 3; i++) {
+          const s = slots.find(x => x.getAttribute("slot").index === i);
+          const child = s.querySelector("[code-block]");
+          parts.push(child ? getText(child) : "___");
+        }
+        this.program.setAttribute("text", "value", parts.join(" "));
+      },
 
-        let best = null;
-        let bestDist = 999;
+      trySnap(blockEl) {
+        const slots = Array.from(document.querySelectorAll("[slot]"));
+        const p = worldPosOf(blockEl);
+
+        let best = null, bestD = 999;
 
         for (const s of slots) {
-          const comp = s.components.slot;
-          if (comp.filled) continue;
-
-          const slotPos = new THREE.Vector3();
-          s.object3D.getWorldPosition(slotPos);
-
-          const d = slotPos.distanceTo(blockPos);
-          if (d < bestDist) { bestDist = d; best = s; }
+          if (s.components.slot.filled) continue;
+          const sp = worldPosOf(s);
+          const d = sp.distanceTo(p);
+          if (d < bestD) { bestD = d; best = s; }
         }
 
-        // radio de “snap”
-        if (!best || bestDist > 0.35) return false;
+        // SNAP amplio para que sea fácil en VR
+        if (!best || bestD > 0.45) return false;
 
-        // Encajar
         const idx = best.getAttribute("slot").index;
+
+        // Encajar en ranura
         best.appendChild(blockEl);
         blockEl.setAttribute("position", "0 0.10 0");
         blockEl.setAttribute("rotation", "0 0 0");
-
         best.components.slot.filled = true;
 
         // Validar
-        const expected = this.expectedForIndex(idx);
         const actual = getText(blockEl);
+        const expected = this.expected[idx];
 
         if (actual === expected) {
           blockEl.setAttribute("material", "color: #22c55e; roughness: 0.4");
-          this.slotState[idx] = "ok";
-          this.explainCorrect(idx);
+          this.state[idx] = "ok";
+          this.explainOk(idx);
         } else {
           blockEl.setAttribute("material", "color: #ef4444; roughness: 0.4");
-          this.slotState[idx] = "bad";
-          this.explainWrong(idx, expected, actual);
-
-          // Reset automático a los 1.2s
-          setTimeout(() => this.resetSlot(idx), 1200);
+          this.state[idx] = "bad";
+          this.explainBad(idx, expected, actual);
+          setTimeout(() => this.resetSlot(idx), 900);
         }
 
         this.renderProgram();
@@ -170,54 +139,15 @@
         return true;
       },
 
-      renderProgram() {
+      resetSlot(idx) {
         const slots = Array.from(document.querySelectorAll("[slot]"));
-        const parts = [];
-
-        for (let i = 0; i < 3; i++) {
-          const s = slots.find(x => x.getAttribute("slot").index === i);
-          const child = s.querySelector("[code-block]");
-          parts.push(child ? getText(child) : "___");
-        }
-
-        // sin espacios raros
-        this.program.setAttribute("text", "value", parts.join(" "));
-      },
-
-      explainCorrect(index) {
-        if (index === 0) {
-          this.setUI("✅ Bien: print(", "print() es una función.\nSirve para mostrar algo en la consola.\n\nAhora pon el texto dentro y luego cierra con ).");
-        } else if (index === 1) {
-          this.setUI("✅ Bien: \"Hello World\"", "Esto es texto (cadena).\nLo que pongas entre comillas es lo que saldrá impreso.");
-        } else {
-          this.setUI("✅ Bien: )", "Con ) cierras el print(...).\nSin cerrar, el programa queda incompleto.");
-        }
-      },
-
-      explainWrong(index, expected, actual) {
-        let msg =
-          `❌ No va aquí.\n\n` +
-          `Esperado: ${expected}\n` +
-          `Pusiste:  ${actual}\n\n`;
-
-        if (index === 0) msg += "Pista: primero va el comando que hace la acción.";
-        if (index === 1) msg += "Pista: en el centro va lo que quieres imprimir.";
-        if (index === 2) msg += "Pista: al final se cierra el paréntesis.";
-
-        this.setUI("Intenta otra vez", msg);
-      },
-
-      resetSlot(index) {
-        const slots = Array.from(document.querySelectorAll("[slot]"));
-        const s = slots.find(x => x.getAttribute("slot").index === index);
+        const s = slots.find(x => x.getAttribute("slot").index === idx);
         const b = s.querySelector("[code-block]");
         if (!b) return;
 
-        // liberar ranura
         s.components.slot.filled = false;
-        this.slotState[index] = null;
+        this.state[idx] = null;
 
-        // devolver bloque
         const table = document.querySelector("#table");
         table.appendChild(b);
         b.setAttribute("position", b.getAttribute("data-homepos"));
@@ -227,8 +157,26 @@
         this.renderProgram();
       },
 
+      explainOk(idx) {
+        if (idx === 0) {
+          this.setUI("✅ Bien: print(", "print() es una función.\nSirve para MOSTRAR algo en la consola.\n\nAhora pon el texto dentro.");
+        } else if (idx === 1) {
+          this.setUI("✅ Bien: \"Hello World\"", "Esto es texto.\nTodo lo que esté entre comillas es lo que se imprime.");
+        } else {
+          this.setUI("✅ Bien: )", "Cierra el paréntesis.\nSin esto, la instrucción queda incompleta.");
+        }
+      },
+
+      explainBad(idx, expected, actual) {
+        let msg = `❌ Ese bloque no va aquí.\n\nEsperado: ${expected}\nPusiste: ${actual}\n\n`;
+        if (idx === 0) msg += "Pista: primero va la acción (print).";
+        if (idx === 1) msg += "Pista: en el centro va lo que quieres imprimir.";
+        if (idx === 2) msg += "Pista: al final se cierra con ).";
+        this.setUI("Reintenta", msg);
+      },
+
       checkWin() {
-        if (!this.slotState.every(x => x === "ok")) return;
+        if (!this.state.every(x => x === "ok")) return;
 
         this.badge.setAttribute("visible", "true");
         this.addConsole("\n> Ejecutando: print(\"Hello World\")\n");
@@ -237,150 +185,262 @@
 
         this.setUI(
           "🎉 Nivel 1 completado",
-          "Formaste:\nprint(\"Hello World\")\n\nResumen:\n- print(...) muestra algo en consola\n- \"Hello World\" es el contenido\n- ( y ) encierran los argumentos"
+          "Armaste: print(\"Hello World\")\n\nResumen:\n- print(...) muestra en consola\n- \"Hello World\" es el contenido\n- ( y ) encierran lo que print recibe"
         );
       }
     });
 
-    // --- Hacer que textos siempre miren a la cámara (más legible en VR)
-    AFRAME.registerComponent("billboard", {
-      init() { this.cam = document.querySelector("#cam").object3D; },
-      tick() {
-        const obj = this.el.object3D;
-        const pos = new THREE.Vector3();
-        obj.getWorldPosition(pos);
-        obj.lookAt(this.cam.position.x, this.cam.position.y, this.cam.position.z);
+    // ======================
+    // Controles: laser + gatillo (fallback)
+    // ======================
+    AFRAME.registerComponent("controller-grabber", {
+      init() {
+        this.grabbed = null;
+
+        this.el.addEventListener("triggerdown", () => this.grab());
+        this.el.addEventListener("triggerup", () => this.drop());
+        this.el.addEventListener("gripdown", () => this.grab());
+        this.el.addEventListener("gripup", () => this.drop());
+      },
+
+      grab() {
+        if (this.grabbed) return;
+
+        const ray = this.el.components.raycaster;
+        if (!ray || !ray.intersections || ray.intersections.length === 0) return;
+
+        const rawHitEl = ray.intersections[0].object.el;
+        const blockEl = findBlockEntityFromHit(rawHitEl);
+        if (!blockEl) return;
+
+        this.grabbed = blockEl;
+
+        // Adjuntar al control
+        this.el.object3D.add(blockEl.object3D);
+        blockEl.object3D.position.set(0, 0, -0.18);
+
+        blockEl.setAttribute("animation__grab", "property: scale; dur: 90; to: 1.07 1.07 1.07");
+      },
+
+      drop() {
+        if (!this.grabbed) return;
+        const blockEl = this.grabbed;
+
+        const gm = document.querySelector("[game-manager]").components["game-manager"];
+        const snapped = gm.trySnap(blockEl);
+
+        if (!snapped) {
+          const table = document.querySelector("#table");
+          table.appendChild(blockEl);
+          blockEl.setAttribute("position", blockEl.getAttribute("data-homepos"));
+          blockEl.setAttribute("rotation", "0 0 0");
+          blockEl.setAttribute("material", "color: #2563eb; roughness: 0.4");
+        }
+
+        blockEl.removeAttribute("animation__grab");
+        blockEl.setAttribute("scale", "1 1 1");
+        this.grabbed = null;
+      }
+    });
+
+    // ======================
+    // Manos: Pinch grab (hand tracking)
+    // ======================
+    // A-Frame hand-tracking-controls suele emitir:
+    //   "pinchstarted" y "pinchended"
+    // Si tu build del navegador/AFRAME no los emite, aún así tendrás controles.
+    AFRAME.registerComponent("pinch-grabber", {
+      schema: {
+        grabRadius: { type: "number", default: 0.18 } // radio para “agarrar” cerca
+      },
+      init() {
+        this.grabbed = null;
+
+        // Debug opcional: muestra si llegan eventos
+        // this.el.addEventListener("pinchstarted", (e) => console.log("pinchstarted", e));
+        // this.el.addEventListener("pinchended", (e) => console.log("pinchended", e));
+
+        this.el.addEventListener("pinchstarted", () => this.pinchGrab());
+        this.el.addEventListener("pinchended", () => this.pinchDrop());
+      },
+
+      pinchGrab() {
+        if (this.grabbed) return;
+
+        const handPos = worldPosOf(this.el);
+
+        // Busca el bloque más cercano dentro del radio
+        const blocks = Array.from(document.querySelectorAll("[code-block]"));
+        let best = null, bestD = 999;
+
+        for (const b of blocks) {
+          // si ya está dentro de una ranura llena, igual puedes impedirlo si quieres,
+          // pero aquí lo dejamos libre para demo
+          const bp = worldPosOf(b);
+          const d = bp.distanceTo(handPos);
+          if (d < bestD) { bestD = d; best = b; }
+        }
+
+        if (!best || bestD > this.data.grabRadius) return;
+
+        this.grabbed = best;
+
+        // Adjuntar a la mano (lo “tienes” pegado a la mano)
+        this.el.object3D.add(best.object3D);
+        best.object3D.position.set(0, 0, -0.08); // un poquito delante de la mano
+
+        best.setAttribute("animation__grab", "property: scale; dur: 90; to: 1.07 1.07 1.07");
+      },
+
+      pinchDrop() {
+        if (!this.grabbed) return;
+        const blockEl = this.grabbed;
+
+        const gm = document.querySelector("[game-manager]").components["game-manager"];
+        const snapped = gm.trySnap(blockEl);
+
+        if (!snapped) {
+          const table = document.querySelector("#table");
+          table.appendChild(blockEl);
+          blockEl.setAttribute("position", blockEl.getAttribute("data-homepos"));
+          blockEl.setAttribute("rotation", "0 0 0");
+          blockEl.setAttribute("material", "color: #2563eb; roughness: 0.4");
+        }
+
+        blockEl.removeAttribute("animation__grab");
+        blockEl.setAttribute("scale", "1 1 1");
+        this.grabbed = null;
       }
     });
   </script>
 </head>
 
 <body>
+  <!--
+    WebXR:
+    - optionalFeatures incluye hand-tracking (manos) y local-floor (suelo).
+    - Funciona por HTTPS (GitHub Pages perfecto).
+  -->
   <a-scene
     background="color: #0b1020"
-    renderer="colorManagement: true"
+    webxr="optionalFeatures: hand-tracking, local-floor;"
   >
     <!-- Cámara -->
     <a-entity id="rig" position="0 0 0">
       <a-camera id="cam" position="0 1.6 0"></a-camera>
     </a-entity>
 
-    <!-- Controles VR: rayos para interactuar -->
+    <!-- CONTROLES (fallback): laser + raycaster + grab -->
     <a-entity
-      id="rightHand"
+      id="rightController"
       laser-controls="hand: right"
-      raycaster="objects: .grabbable; far: 6"
-      line="opacity: 0.8"
-      ray-grabber="hand: right"
+      raycaster="objects: .grabbable; far: 8; interval: 50"
+      line="opacity: 0.9"
+      controller-grabber
     ></a-entity>
 
     <a-entity
-      id="leftHand"
+      id="leftController"
       laser-controls="hand: left"
-      raycaster="objects: .grabbable; far: 6"
-      line="opacity: 0.6"
-      ray-grabber="hand: left"
+      raycaster="objects: .grabbable; far: 8; interval: 50"
+      line="opacity: 0.55"
+      controller-grabber
     ></a-entity>
 
-    <!-- Luz -->
-    <a-entity light="type: ambient; intensity: 0.85"></a-entity>
-    <a-entity light="type: directional; intensity: 1" position="2 4 1"></a-entity>
+    <!-- MANOS: hand tracking + pinch grab -->
+    <a-entity id="rightHand" hand-tracking-controls="hand: right" pinch-grabber="grabRadius: 0.18"></a-entity>
+    <a-entity id="leftHand"  hand-tracking-controls="hand: left"  pinch-grabber="grabRadius: 0.18"></a-entity>
+
+    <!-- Luces -->
+    <a-entity light="type: ambient; intensity: 0.9"></a-entity>
+    <a-entity light="type: directional; intensity: 1.1" position="2 4 1"></a-entity>
 
     <!-- Piso -->
     <a-plane rotation="-90 0 0" width="30" height="30" color="#111827"></a-plane>
 
-    <!-- Mesa (contenedor para devolver bloques) -->
+    <!-- Mesa -->
     <a-entity id="table">
-      <a-box position="0 0.6 -1.4" width="2.8" height="0.2" depth="1.4" color="#1f2937"></a-box>
-      <a-box position="0 0.3 -1.4" width="2.6" height="0.6" depth="1.2" color="#0b1220"></a-box>
+      <a-box position="0 0.6 -1.25" width="2.9" height="0.2" depth="1.5" color="#1f2937"></a-box>
+      <a-box position="0 0.3 -1.25" width="2.7" height="0.6" depth="1.3" color="#0b1220"></a-box>
     </a-entity>
 
-    <!-- BLOQUES DESORDENADOS -->
-    <a-entity
-      id="blk_print" class="grabbable"
-      code-block
+    <!-- Bloques (grabbable + code-block) -->
+    <a-entity class="grabbable" code-block
+      geometry="primitive: box; width: 0.9; height: 0.2; depth: 0.3"
       material="color:#2563eb; roughness:0.4"
-      geometry="primitive: box; width:0.85; height:0.18; depth:0.28"
-      position="-0.7 1.05 -1.35"
+      position="-0.9 1.05 -1.05"
       rotation="0 0 0"
-      data-text="print("
-      data-homepos="-0.7 1.05 -1.35"
+      data-text='print('
+      data-homepos="-0.9 1.05 -1.05"
     >
-      <a-plane width="0.82" height="0.16" position="0 0 0.141" color="#1e3a8a"></a-plane>
-      <a-text billboard value="print(" align="center" color="#ffffff" width="2.2"
-              position="0 0 0.151"></a-text>
+      <a-plane width="0.88" height="0.18" position="0 0 0.151" color="#1e3a8a"></a-plane>
+      <a-text billboard value="print(" align="center" width="3.0" color="#fff" position="0 0 0.165"></a-text>
     </a-entity>
 
-    <a-entity
-      id="blk_text" class="grabbable"
-      code-block
+    <a-entity class="grabbable" code-block
+      geometry="primitive: box; width: 1.35; height: 0.2; depth: 0.3"
       material="color:#2563eb; roughness:0.4"
-      geometry="primitive: box; width:1.20; height:0.18; depth:0.28"
-      position="0.2 1.05 -1.55"
+      position="0.0 1.05 -1.45"
       rotation="0 0 0"
-      data-text="&quot;Hello World&quot;"
-      data-homepos="0.2 1.05 -1.55"
+      data-text='"Hello World"'
+      data-homepos="0.0 1.05 -1.45"
     >
-      <a-plane width="1.16" height="0.16" position="0 0 0.141" color="#1e3a8a"></a-plane>
-      <a-text billboard value='"Hello World"' align="center" color="#ffffff" width="3.0"
-              position="0 0 0.151"></a-text>
+      <a-plane width="1.33" height="0.18" position="0 0 0.151" color="#1e3a8a"></a-plane>
+      <a-text billboard value='"Hello World"' align="center" width="3.6" color="#fff" position="0 0 0.165"></a-text>
     </a-entity>
 
-    <a-entity
-      id="blk_close" class="grabbable"
-      code-block
+    <a-entity class="grabbable" code-block
+      geometry="primitive: box; width: 0.55; height: 0.2; depth: 0.3"
       material="color:#2563eb; roughness:0.4"
-      geometry="primitive: box; width:0.45; height:0.18; depth:0.28"
-      position="0.95 1.05 -1.25"
+      position="1.05 1.05 -1.1"
       rotation="0 0 0"
-      data-text=")"
-      data-homepos="0.95 1.05 -1.25"
+      data-text=')'
+      data-homepos="1.05 1.05 -1.1"
     >
-      <a-plane width="0.42" height="0.16" position="0 0 0.141" color="#1e3a8a"></a-plane>
-      <a-text billboard value=")" align="center" color="#ffffff" width="2.0"
-              position="0 0 0.151"></a-text>
+      <a-plane width="0.53" height="0.18" position="0 0 0.151" color="#1e3a8a"></a-plane>
+      <a-text billboard value=")" align="center" width="3.0" color="#fff" position="0 0 0.165"></a-text>
     </a-entity>
 
-    <!-- PANEL DE ARMADO (3 ranuras) -->
-    <a-entity position="0 1.15 -0.9" rotation="0 0 0">
-      <a-box width="2.2" height="0.35" depth="0.6" color="#0f172a" opacity="0.95"></a-box>
+    <!-- Panel de armado (ranuras) -->
+    <a-entity position="0 1.25 -0.55" rotation="0 0 0">
+      <a-box width="2.5" height="0.42" depth="0.7" color="#0f172a" opacity="0.95"></a-box>
 
-      <a-box position="-0.65 0.02 0" width="0.85" height="0.16" depth="0.28"
-             material="color:#334155; opacity:0.7" slot="index: 0"></a-box>
+      <a-box position="-0.78 0.03 0" width="0.9" height="0.2" depth="0.3"
+             material="color:#334155; opacity:0.75" slot="index: 0"></a-box>
 
-      <a-box position="0.15 0.02 0" width="1.20" height="0.16" depth="0.28"
-             material="color:#334155; opacity:0.7" slot="index: 1"></a-box>
+      <a-box position="0.10 0.03 0" width="1.35" height="0.2" depth="0.3"
+             material="color:#334155; opacity:0.75" slot="index: 1"></a-box>
 
-      <a-box position="0.95 0.02 0" width="0.45" height="0.16" depth="0.28"
-             material="color:#334155; opacity:0.7" slot="index: 2"></a-box>
+      <a-box position="1.07 0.03 0" width="0.55" height="0.2" depth="0.3"
+             material="color:#334155; opacity:0.75" slot="index: 2"></a-box>
 
-      <a-text value="Suelta aquí en orden" color="#cbd5e1" width="3"
-              position="-1.05 0.18 0.25"></a-text>
+      <a-text value="Suelta aquí en orden" color="#cbd5e1" width="3.5"
+              position="-1.18 0.22 0.30"></a-text>
     </a-entity>
 
     <!-- Línea armada -->
-    <a-entity position="-0.9 2.25 -1.6">
-      <a-text value="Programa:" color="#93c5fd" width="3" position="0 0.15 0"></a-text>
-      <a-text id="programLine" value="___ ___ ___" color="#e2e8f0" width="4" position="0 0 0"></a-text>
+    <a-entity position="-1.1 2.25 -1.2">
+      <a-text value="Programa:" color="#93c5fd" width="3.2" position="0 0.18 0"></a-text>
+      <a-text id="programLine" value="___ ___ ___" color="#e2e8f0" width="4.8" position="0 0 0"></a-text>
     </a-entity>
 
     <!-- Consola -->
-    <a-entity position="-1.1 1.4 -2.2" rotation="0 15 0">
-      <a-plane width="2.1" height="1.05" color="#0b1220" opacity="0.95"></a-plane>
-      <a-text id="console" value="> Consola\n" position="-1.0 0.45 0.01" width="2.1"
-              color="#a7f3d0" wrap-count="48"></a-text>
-      <a-text value="Consola" position="-1.0 0.56 0.02" width="2" color="#93c5fd"></a-text>
+    <a-entity position="-1.2 1.42 -2.0" rotation="0 12 0">
+      <a-plane width="2.2" height="1.1" color="#0b1220" opacity="0.95"></a-plane>
+      <a-text id="console" value="> Consola\n" position="-1.05 0.46 0.01" width="2.2"
+              color="#a7f3d0" wrap-count="50"></a-text>
+      <a-text value="Consola" position="-1.05 0.59 0.02" width="2" color="#93c5fd"></a-text>
     </a-entity>
 
-    <!-- Tutor UI -->
-    <a-entity position="0.9 1.75 -1.7" rotation="0 -15 0" game-manager>
-      <a-plane width="2.4" height="1.2" color="#0f172a" opacity="0.92"></a-plane>
-      <a-text id="uiTitle" value="..." position="-1.15 0.48 0.01" width="2.3" color="#e2e8f0"></a-text>
-      <a-text id="uiBody" value="..." position="-1.15 0.25 0.01" width="2.3" color="#cbd5e1" wrap-count="56"></a-text>
+    <!-- Tutor (game-manager) -->
+    <a-entity position="1.05 1.75 -1.55" rotation="0 -12 0" game-manager>
+      <a-plane width="2.5" height="1.25" color="#0f172a" opacity="0.92"></a-plane>
+      <a-text id="uiTitle" value="..." position="-1.2 0.5 0.01" width="2.4" color="#e2e8f0"></a-text>
+      <a-text id="uiBody" value="..." position="-1.2 0.27 0.01" width="2.4" color="#cbd5e1" wrap-count="60"></a-text>
     </a-entity>
 
     <a-text id="badge" value="✅ Nivel 1 completado" visible="false"
-            position="-0.7 2.55 -1.2" width="4" color="#86efac"></a-text>
+            position="-0.9 2.55 -0.9" width="4.5" color="#86efac"></a-text>
   </a-scene>
 </body>
 </html>
