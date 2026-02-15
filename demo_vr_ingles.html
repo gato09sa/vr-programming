@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Puzzle VR: arma print("Hello World")</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+
+  <script>
+    // ====== Util: texto desde atributo
+    function getText(el) { return el.getAttribute("data-text"); }
+
+    // ====== Grab sencillo: click para agarrar/soltar (desktop + cursor/ray).
+    AFRAME.registerComponent("grab-click", {
+      init() {
+        this.grabbed = false;
+        this.cam = document.querySelector("#cam");
+        this.startParent = this.el.parentNode;
+        this.el.classList.add("clickable");
+        this.el.addEventListener("click", () => this.toggle());
+      },
+      toggle() {
+        if (!this.grabbed) {
+          this.startParent = this.el.parentNode;
+          this.cam.appendChild(this.el);
+          this.el.setAttribute("position", "0 -0.25 -1");
+          this.grabbed = true;
+          this.el.emit("grabbed");
+        } else {
+          this.startParent.appendChild(this.el);
+          this.el.setAttribute("position", this.el.getAttribute("data-homepos"));
+          this.grabbed = false;
+          this.el.emit("released");
+        }
+      }
+    });
+
+    // ====== Ranura: acepta 1 bloque, valida si es el correcto (por índice).
+    AFRAME.registerComponent("slot", {
+      schema: {
+        index: { type: "int" },          // 0,1,2...
+        snapDistance: { type: "number", default: 0.32 }
+      },
+      init() {
+        this.filled = false;
+        this.acceptedBlockId = null;
+        this.onTick = AFRAME.utils.throttleTick(this.onTick, 100, this);
+      },
+      tick(t, dt){ this.onTick(t, dt); },
+      onTick() {
+        if (this.filled) return;
+
+        const blocks = document.querySelectorAll("[code-block]");
+        const slotPos = new THREE.Vector3();
+        this.el.object3D.getWorldPosition(slotPos);
+
+        for (const b of blocks) {
+          const bPos = new THREE.Vector3();
+          b.object3D.getWorldPosition(bPos);
+          const dist = slotPos.distanceTo(bPos);
+
+          // Solo encajamos si está cerca Y está agarrado (evita auto-snap desde lejos)
+          const grabbed = b.parentNode && b.parentNode.id === "cam";
+          if (grabbed && dist <= this.data.snapDistance) {
+            this.tryPlace(b);
+            break;
+          }
+        }
+      },
+      tryPlace(blockEl) {
+        const gm = document.querySelector("[game-manager]").components["game-manager"];
+        const expected = gm.expectedForIndex(this.data.index); // texto esperado
+
+        const actual = getText(blockEl);
+
+        // Encajamos visualmente siempre, pero marcamos correcto/incorrecto
+        this.el.appendChild(blockEl);
+        blockEl.setAttribute("position", "0 0.11 0");
+        blockEl.setAttribute("rotation", "0 0 0");
+
+        this.filled = true;
+        this.acceptedBlockId = blockEl.id;
+
+        if (actual === expected) {
+          blockEl.setAttribute("material", "color: #22c55e; roughness: 0.4"); // verde
+          gm.onPlacedCorrect(this.data.index, blockEl);
+        } else {
+          blockEl.setAttribute("material", "color: #ef4444; roughness: 0.4"); // rojo
+          gm.onPlacedWrong(this.data.index, blockEl, expected, actual);
+        }
+      }
+    });
+
+    // ====== Game Manager: narrativa, explicación, validación final.
+    AFRAME.registerComponent("game-manager", {
+      init() {
+        this.steps = ['print(', '"Hello World"', ')'];
+
+        // Estado de ranuras: null / correcto / incorrecto
+        this.slotState = [null, null, null];
+
+        this.uiTitle = document.querySelector("#uiTitle");
+        this.uiBody  = document.querySelector("#uiBody");
+        this.console = document.querySelector("#console");
+        this.program = document.querySelector("#programLine");
+        this.badge   = document.querySelector("#badge");
+
+        this.setUI(
+          "Nivel 1: arma tu primer programa",
+          "Tienes 3 bloques desordenados. Debes formar:\nprint(\"Hello World\")\n\n" +
+          "Tip: print(...) necesita paréntesis y adentro va el texto."
+        );
+        this.setConsole("> Consola lista.\n");
+        this.renderProgram();
+      },
+
+      expectedForIndex(i){ return this.steps[i]; },
+
+      setUI(title, body) {
+        this.uiTitle.setAttribute("text", "value", title);
+        this.uiBody.setAttribute("text", "value", body);
+      },
+
+      setConsole(text) { this.console.setAttribute("text", "value", text); },
+      addConsole(line) {
+        const cur = this.console.getAttribute("text").value;
+        this.setConsole(cur + line);
+      },
+
+      renderProgram() {
+        // Lee lo que hay en cada ranura para mostrar la línea armada
+        const slots = document.querySelectorAll("[slot]");
+        let parts = [];
+        for (let i=0;i<3;i++){
+          const s = Array.from(slots).find(x => x.getAttribute("slot").index === i);
+          const child = s.querySelector("[code-block]");
+          parts.push(child ? getText(child) : "___");
+        }
+        this.program.setAttribute("text", "value", parts.join(" "));
+      },
+
+      onPlacedCorrect(index, blockEl) {
+        this.slotState[index] = "ok";
+        this.renderProgram();
+
+        // Explicación contextual por pieza
+        if (index === 0) {
+          this.setUI(
+            "✅ Bien: print(",
+            "print es una función.\n" +
+            "Sirve para mostrar información en la consola.\n\n" +
+            "Ahora falta: el texto y cerrar el paréntesis )"
+          );
+        } else if (index === 1) {
+          this.setUI(
+            "✅ Bien: el texto",
+            "Esto es una cadena de texto.\n" +
+            "Lo que pongas entre comillas es lo que se va a imprimir.\n\n" +
+            "Ahora falta cerrar con )"
+          );
+        } else if (index === 2) {
+          this.setUI(
+            "✅ Bien: )",
+            "El paréntesis de cierre indica que terminaste de pasarle el contenido a print.\n" +
+            "Sin esto, el programa queda “incompleto”."
+          );
+        }
+
+        this.checkWin();
+      },
+
+      onPlacedWrong(index, blockEl, expected, actual) {
+        this.slotState[index] = "bad";
+        this.renderProgram();
+
+        // Mensaje pedagógico: por qué está mal
+        let msg = "❌ Ese bloque no va aquí.\n\n";
+        msg += `Aquí se espera: ${expected}\n`;
+        msg += `Tú pusiste: ${actual}\n\n`;
+
+        if (index === 0) {
+          msg += "Pista: primero va el comando que ejecuta la acción (print).";
+        } else if (index === 1) {
+          msg += "Pista: dentro del paréntesis va lo que quieres imprimir (texto).";
+        } else if (index === 2) {
+          msg += "Pista: al final debes cerrar el paréntesis para completar la instrucción.";
+        }
+
+        this.setUI("Intenta de nuevo", msg);
+
+        // Extra: “reset” suave después de 1.2s (para que vuelva a intentar)
+        setTimeout(() => {
+          this.resetSlot(index);
+        }, 1200);
+      },
+
+      resetSlot(index) {
+        const slots = document.querySelectorAll("[slot]");
+        const s = Array.from(slots).find(x => x.getAttribute("slot").index === index);
+        const b = s.querySelector("[code-block]");
+        if (!b) return;
+
+        // devolver bloque a su posición de inicio
+        const homePos = b.getAttribute("data-homepos");
+        const table = document.querySelector("#tableTop");
+        table.appendChild(b);
+        b.setAttribute("position", homePos);
+
+        // color original azul
+        b.setAttribute("material", "color: #2563eb; roughness: 0.4");
+
+        // liberar ranura
+        s.components.slot.filled = false;
+        s.components.slot.acceptedBlockId = null;
+        this.slotState[index] = null;
+
+        this.renderProgram();
+      },
+
+      checkWin() {
+        if (this.slotState.every(x => x === "ok")) {
+          this.badge.setAttribute("visible", "true");
+
+          // Ejecutar “programa”
+          this.addConsole("\n> Ejecutando: print(\"Hello World\")\n");
+          this.addConsole("Hello World\n");
+          this.addConsole("> OK\n");
+
+          this.setUI(
+            "🎉 Nivel 1 completado",
+            "Formaste la instrucción completa:\nprint(\"Hello World\")\n\n" +
+            "Resumen:\n" +
+            "- print(...) muestra algo en la consola\n" +
+            "- \"Hello World\" es el contenido a imprimir\n" +
+            "- ( y ) encierran lo que print recibe"
+          );
+        }
+      }
+    });
+  </script>
+</head>
+
+<body>
+  <a-scene
+    background="color: #0b1020"
+    cursor="rayOrigin: mouse"
+    raycaster="objects: .clickable"
+  >
+    <!-- Cámara -->
+    <a-camera id="cam" position="0 1.6 0">
+      <a-cursor></a-cursor>
+    </a-camera>
+
+    <!-- Luces -->
+    <a-entity light="type: ambient; intensity: 0.85"></a-entity>
+    <a-entity light="type: directional; intensity: 1" position="2 4 1"></a-entity>
+
+    <!-- Piso -->
+    <a-plane rotation="-90 0 0" width="30" height="30" color="#111827"></a-plane>
+
+    <!-- Mesa -->
+    <a-box id="tableTop" position="0 0.6 -1.4" width="2.7" height="0.2" depth="1.3" color="#1f2937"></a-box>
+    <a-box position="0 0.3 -1.4" width="2.5" height="0.6" depth="1.1" color="#0b1220"></a-box>
+
+    <!-- Bloques DESORDENADOS -->
+    <a-entity
+      id="b1" code-block grab-click
+      data-text='")"'
+      position="-0.9 1.05 -1.2"
+      data-homepos="-0.9 1.05 -1.2"
+    >
+      <a-box width="0.45" height="0.18" depth="0.28" material="color:#2563eb; roughness:0.4"></a-box>
+      <a-text value=")" position="-0.08 0.02 0.15" rotation="-90 0 0" width="1.2" color="#fff"></a-text>
+    </a-entity>
+
+    <a-entity
+      id="b2" code-block grab-click
+      data-text='print('
+      position="-0.2 1.05 -1.55"
+      data-homepos="-0.2 1.05 -1.55"
+    >
+      <a-box width="0.75" height="0.18" depth="0.28" material="color:#2563eb; roughness:0.4"></a-box>
+      <a-text value="print(" position="-0.32 0.02 0.15" rotation="-90 0 0" width="1.4" color="#fff"></a-text>
+    </a-entity>
+
+    <a-entity
+      id="b3" code-block grab-click
+      data-text='"Hello World"'
+      position="0.6 1.05 -1.25"
+      data-homepos="0.6 1.05 -1.25"
+    >
+      <a-box width="1.05" height="0.18" depth="0.28" material="color:#2563eb; roughness:0.4"></a-box>
+      <a-text value='"Hello World"' position="-0.48 0.02 0.15" rotation="-90 0 0" width="1.8" color="#fff"></a-text>
+    </a-entity>
+
+    <!-- Panel de armado (3 ranuras en orden) -->
+    <a-entity position="0.9 1.05 -1.4" rotation="0 -10 0">
+      <a-box width="1.6" height="0.32" depth="0.55" color="#0f172a" opacity="0.95"></a-box>
+
+      <a-box position="-0.45 0.03 0" width="0.45" height="0.15" depth="0.25"
+             material="color:#334155; opacity:0.65" slot="index: 0"></a-box>
+
+      <a-box position="0.05 0.03 0" width="0.65" height="0.15" depth="0.25"
+             material="color:#334155; opacity:0.65" slot="index: 1"></a-box>
+
+      <a-box position="0.55 0.03 0" width="0.35" height="0.15" depth="0.25"
+             material="color:#334155; opacity:0.65" slot="index: 2"></a-box>
+
+      <a-text value="Arma la línea aquí" position="-0.75 0.17 0.25" width="2" color="#cbd5e1"></a-text>
+    </a-entity>
+
+    <!-- Línea armada (feedback) -->
+    <a-entity position="-0.2 2.25 -1.7">
+      <a-text value="Programa:" position="-0.6 0.15 0" width="3" color="#93c5fd"></a-text>
+      <a-text id="programLine" value="___ ___ ___" position="-0.6 0 0" width="3.6" color="#e2e8f0"></a-text>
+    </a-entity>
+
+    <!-- Consola -->
+    <a-entity position="-1.0 1.45 -2.3" rotation="0 15 0">
+      <a-plane width="2.0" height="1.05" color="#0b1220" opacity="0.95"></a-plane>
+      <a-text id="console" value="> Consola\n" position="-0.95 0.45 0.01" width="2.0"
+              color="#a7f3d0" wrap-count="44"></a-text>
+      <a-text value="Consola" position="-0.95 0.56 0.02" width="2" color="#93c5fd"></a-text>
+    </a-entity>
+
+    <!-- UI / tutor -->
+    <a-entity position="0 1.55 -1.65" game-manager>
+      <a-plane width="2.6" height="1.25" color="#0f172a" opacity="0.92"></a-plane>
+      <a-text id="uiTitle" value="..." position="-1.25 0.5 0.01" width="2.5" color="#e2e8f0"></a-text>
+      <a-text id="uiBody" value="..." position="-1.25 0.28 0.01" width="2.5" color="#cbd5e1" wrap-count="58"></a-text>
+    </a-entity>
+
+    <!-- Badge -->
+    <a-text id="badge" value="✅ Nivel 1 completado" visible="false"
+            position="-0.7 2.55 -1.5" width="4" color="#86efac"></a-text>
+  </a-scene>
+</body>
+</html>
