@@ -2,19 +2,16 @@
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <title>CODEA VR - Isla de los Algoritmos</title>
+  <title>CODEA VR - Scratch Layout (L1)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <script src="https://aframe.io/releases/1.7.1/aframe.min.js"></script>
 
   <script>
-    // =======================
-    // Utils
-    // =======================
     const V3 = THREE.Vector3;
 
     function worldPosOf(el) {
       const v = new V3();
-      if (el && el.object3D) el.object3D.getWorldPosition(v);
+      if (el?.object3D) el.object3D.getWorldPosition(v);
       return v;
     }
 
@@ -32,34 +29,17 @@
     }
 
     function triggerVibration(controllerEl, intensity = 0.5, duration = 60) {
-      // En Quest, tracked-controls.controller suele ser el gamepad
       const tc = controllerEl.components["tracked-controls"];
       const gamepad = tc && tc.controller;
-      if (gamepad && gamepad.hapticActuators && gamepad.hapticActuators.length) {
-        gamepad.hapticActuators[0].pulse(intensity, duration);
-      }
+      if (gamepad?.hapticActuators?.length) gamepad.hapticActuators[0].pulse(intensity, duration);
     }
 
-    // =======================
-    // Billboard: texto siempre mira a cámara
-    // =======================
-    AFRAME.registerComponent("billboard", {
-      init() { this.cam = document.querySelector("#cam"); },
-      tick() {
-        if (!this.cam) return;
-        this.el.object3D.lookAt(this.cam.object3D.position);
-      }
-    });
-
-    // =======================
-    // UI Button (plane clickable)
-    // =======================
+    // ---------- UI Button ----------
     AFRAME.registerComponent("ui-button", {
       schema: { action: { type: "string" }, label: { type: "string" } },
       init() {
         this.el.classList.add("clickable");
-        this.el.setAttribute("material", "color:#1f2937; opacity:0.95");
-        this.el.setAttribute("geometry", this.el.getAttribute("geometry") || "primitive: plane");
+        this.el.setAttribute("material", "shader: flat; color:#1f2937; opacity:0.98");
 
         const t = document.createElement("a-text");
         t.setAttribute("value", this.data.label);
@@ -67,59 +47,66 @@
         t.setAttribute("color", "#e2e8f0");
         t.setAttribute("width", "2.2");
         t.setAttribute("position", "0 0 0.01");
-        t.setAttribute("billboard", "");
         this.el.appendChild(t);
 
-        this.el.addEventListener("mouseenter", () => this.el.setAttribute("material", "color:#334155"));
-        this.el.addEventListener("mouseleave", () => this.el.setAttribute("material", "color:#1f2937"));
+        this.el.addEventListener("mouseenter", () => this.el.setAttribute("material", "shader: flat; color:#334155; opacity:0.98"));
+        this.el.addEventListener("mouseleave", () => this.el.setAttribute("material", "shader: flat; color:#1f2937; opacity:0.98"));
       }
     });
 
-    // =======================
-    // Slot
-    // =======================
+    // ---------- Slot ----------
     AFRAME.registerComponent("slot", {
       schema: { index: { type: "int" } },
-      init() { this.filled = false; }
+      init() {
+        this.filled = false;
+        this.base = "#334155";
+        this.hover = "#60a5fa";
+        this.ok = "#16a34a";
+        this.bad = "#ef4444";
+
+        this.el.classList.add("clickable");
+        this.el.setAttribute("material", `shader: flat; color:${this.base}; opacity:0.92`);
+
+        this.el.addEventListener("mouseenter", () => {
+          if (!this.filled) this.el.setAttribute("material", `shader: flat; color:${this.hover}; opacity:0.95`);
+        });
+        this.el.addEventListener("mouseleave", () => {
+          if (!this.filled) this.el.setAttribute("material", `shader: flat; color:${this.base}; opacity:0.92`);
+        });
+      }
     });
 
-    // =======================
-    // Controller Logic
-    // - Trigger: click UI buttons
-    // - Grip: grab / drop blocks
-    // =======================
+    // ---------- Controller Logic ----------
+    // Trigger = UI click, Grip = grab/drop blocks (gatillos traseros)
     AFRAME.registerComponent("controller-logic", {
       init() {
         this.grabbed = null;
 
-        // Trigger -> click UI
+        // UI click (trigger)
         this.el.addEventListener("triggerdown", () => {
           const ray = this.el.components.raycaster;
-          if (!ray || !ray.intersections || !ray.intersections.length) return;
-
-          const hitRaw = ray.intersections[0].object.el;
-          const btn = climbToAttr(hitRaw, "ui-button");
-          if (btn) {
-            triggerVibration(this.el, 0.7, 40);
-            btn.emit("ui-click");
-          }
+          if (!ray?.intersections?.length) return;
+          const hit = ray.intersections[0].object.el;
+          const btn = climbToAttr(hit, "ui-button");
+          if (!btn) return;
+          triggerVibration(this.el, 0.6, 40);
+          btn.emit("ui-click");
         });
 
-        // Grip -> grab block
+        // Grab block (grip)
         this.el.addEventListener("gripdown", () => {
           if (this.grabbed) return;
-
           const ray = this.el.components.raycaster;
-          if (!ray || !ray.intersections || !ray.intersections.length) return;
+          if (!ray?.intersections?.length) return;
 
-          const hitRaw = ray.intersections[0].object.el;
-          const block = climbToAttr(hitRaw, "code-block");
+          const hit = ray.intersections[0].object.el;
+          const block = climbToAttr(hit, "code-block");
           if (!block) return;
 
-          triggerVibration(this.el, 0.35, 70);
+          triggerVibration(this.el, 0.35, 60);
           this.grabbed = block;
 
-          // Mover por object3D para evitar herencias raras de DOM
+          // attach by object3D (más estable)
           this.el.object3D.add(block.object3D);
           block.object3D.position.set(0, 0, -0.16);
           block.object3D.rotation.set(0, 0, 0);
@@ -127,10 +114,9 @@
           block.setAttribute("animation__grab", "property: scale; dur: 80; to: 1.06 1.06 1.06");
         });
 
-        // Grip up -> drop block
+        // Drop block (grip)
         this.el.addEventListener("gripup", () => {
           if (!this.grabbed) return;
-
           const block = this.grabbed;
           this.grabbed = null;
 
@@ -138,14 +124,14 @@
           const snapped = app.trySnap(block);
 
           if (snapped) {
-            triggerVibration(this.el, 1.0, 110);
+            triggerVibration(this.el, 1.0, 90);
           } else {
-            // devolver a paleta
+            // volver a paleta
             const palette = document.querySelector("#paletteBlocks");
             palette.appendChild(block);
             block.setAttribute("position", block.getAttribute("data-homepos"));
             block.setAttribute("rotation", "0 0 0");
-            block.setAttribute("material", "color:#2563eb; roughness:0.4");
+            block.setAttribute("material", "shader: flat; color:#2563eb");
           }
 
           block.removeAttribute("animation__grab");
@@ -154,13 +140,11 @@
       }
     });
 
-    // =======================
-    // App Manager
-    // =======================
+    // ---------- App Manager ----------
     AFRAME.registerComponent("app-manager", {
       init() {
         this.groups = {
-          menu:   document.querySelector("#groupMenu"),
+          menu: document.querySelector("#groupMenu"),
           levels: document.querySelector("#groupLevels"),
           level1: document.querySelector("#groupLevel1")
         };
@@ -168,8 +152,8 @@
         this.hudTitle = document.querySelector("#hudTitle");
         this.hudBody  = document.querySelector("#hudBody");
         this.console  = document.querySelector("#consoleText");
-        this.program  = document.querySelector("#programLine");
         this.badge    = document.querySelector("#badge");
+        this.program  = document.querySelector("#programLine");
 
         this.expected = ['print(', '"Hello World"', ')'];
         this.state = [null, null, null];
@@ -179,10 +163,7 @@
         });
 
         this.show("menu");
-        this.setHUD(
-          "CODEA VR",
-          "Trigger = botones\nGrip = agarrar/soltar bloques\n\nObjetivo: arma print(\"Hello World\")"
-        );
+        this.setHUD("CODEA VR", "Trigger = botones\nGrip (gatillo trasero) = agarrar/soltar\n\nPulsa INICIAR.");
         this.setConsole("> Listo.\n");
         this.renderProgram();
       },
@@ -196,19 +177,12 @@
         this.hudBody.setAttribute("text", "value", b);
       },
 
-      setConsole(v) {
-        this.console.setAttribute("text", "value", v);
-      },
-
-      addConsole(line) {
-        const cur = this.console.getAttribute("text").value;
-        this.setConsole(cur + line);
-      },
+      setConsole(v) { this.console.setAttribute("text", "value", v); },
 
       onUIButton(action) {
         if (action === "start") {
           this.show("levels");
-          this.setHUD("Selecciona nivel", "Elige Nivel 1.");
+          this.setHUD("Niveles", "Elige Nivel 1.");
         }
         if (action === "backToMenu") {
           this.show("menu");
@@ -217,11 +191,11 @@
         if (action === "lvl1") {
           this.resetLevel1();
           this.show("level1");
-          this.setHUD("Nivel 1", "Arrastra 3 bloques desde la paleta hacia la pizarra.\nOrden: print(  \"Hello World\"  )");
+          this.setHUD("Nivel 1: print", "Arrastra desde IZQUIERDA → DERECHA.\n\nOrden:\n1) print(\n2) \"Hello World\"\n3) )");
         }
         if (action === "backToLevels") {
           this.show("levels");
-          this.setHUD("Selecciona nivel", "Elige Nivel 1.");
+          this.setHUD("Niveles", "Elige Nivel 1.");
         }
       },
 
@@ -230,17 +204,18 @@
         this.badge.setAttribute("visible", "false");
         this.setConsole("> Nivel 1 listo.\n");
 
-        // liberar slots SOLO dentro de boardSlots
-        document.querySelectorAll("#boardSlots [slot]").forEach(s => s.components.slot.filled = false);
+        document.querySelectorAll("#boardSlots [slot]").forEach(s => {
+          s.components.slot.filled = false;
+          s.setAttribute("material", "shader: flat; color:#334155; opacity:0.92");
+        });
 
-        // devolver bloques
         const palette = document.querySelector("#paletteBlocks");
         ["blk_print","blk_text","blk_close"].forEach(id => {
           const b = document.querySelector("#"+id);
           palette.appendChild(b);
           b.setAttribute("position", b.getAttribute("data-homepos"));
           b.setAttribute("rotation", "0 0 0");
-          b.setAttribute("material", "color:#2563eb; roughness:0.4");
+          b.setAttribute("material", "shader: flat; color:#2563eb");
           b.setAttribute("scale", "1 1 1");
         });
 
@@ -258,39 +233,36 @@
       },
 
       trySnap(blockEl) {
-        // Solo permitir snap si estamos en Level1 visible
         if (!this.groups.level1.getAttribute("visible")) return false;
 
         const slots = Array.from(document.querySelectorAll("#boardSlots [slot]"));
         const p = worldPosOf(blockEl);
 
         let best = null, bestD = 999;
-
         for (const s of slots) {
           if (s.components.slot.filled) continue;
           const d = worldPosOf(s).distanceTo(p);
           if (d < bestD) { bestD = d; best = s; }
         }
 
-        if (!best || bestD > 0.42) return false;
+        if (!best || bestD > 0.55) return false; // snap más fácil
 
         const idx = best.getAttribute("slot").index;
 
-        // encajar (DOM append para “fijar” en el slot)
         best.appendChild(blockEl);
-        blockEl.setAttribute("position", "0 0 0.16");
+        blockEl.setAttribute("position", "0 0 0.18");
         blockEl.setAttribute("rotation", "0 0 0");
         best.components.slot.filled = true;
 
-        // validar
-        if (getText(blockEl) === this.expected[idx]) {
-          blockEl.setAttribute("material", "color:#22c55e; roughness:0.4");
+        const ok = (getText(blockEl) === this.expected[idx]);
+        if (ok) {
+          blockEl.setAttribute("material", "shader: flat; color:#22c55e");
+          best.setAttribute("material", "shader: flat; color:#16a34a; opacity:0.96");
           this.state[idx] = "ok";
-          this.explainOk(idx);
           this.checkWin();
         } else {
-          blockEl.setAttribute("material", "color:#ef4444; roughness:0.4");
-          this.explainBad(idx);
+          blockEl.setAttribute("material", "shader: flat; color:#ef4444");
+          best.setAttribute("material", "shader: flat; color:#ef4444; opacity:0.96");
           setTimeout(() => this.resetSlot(idx), 850);
         }
 
@@ -305,35 +277,23 @@
         if (!b) return;
 
         s.components.slot.filled = false;
+        s.setAttribute("material", "shader: flat; color:#334155; opacity:0.92");
         this.state[idx] = null;
 
         const palette = document.querySelector("#paletteBlocks");
         palette.appendChild(b);
         b.setAttribute("position", b.getAttribute("data-homepos"));
         b.setAttribute("rotation", "0 0 0");
-        b.setAttribute("material", "color:#2563eb; roughness:0.4");
+        b.setAttribute("material", "shader: flat; color:#2563eb");
 
         this.renderProgram();
       },
 
-      explainOk(idx) {
-        if (idx === 0) this.setHUD("✅ print(", "print() muestra cosas en la consola.\nAhora coloca el texto.");
-        if (idx === 1) this.setHUD("✅ \"Hello World\"", "Esto es texto.\nLo que esté entre comillas se imprime.");
-        if (idx === 2) this.setHUD("✅ )", "Cierra el paréntesis.\n¡Instrucción completa!");
-      },
-
-      explainBad(idx) {
-        if (idx === 0) this.setHUD("❌ Error", "En el slot 1 debe ir: print(");
-        if (idx === 1) this.setHUD("❌ Error", "En el slot 2 debe ir el texto: \"Hello World\"");
-        if (idx === 2) this.setHUD("❌ Error", "En el slot 3 debes cerrar: )");
-      },
-
       checkWin() {
         if (!this.state.every(x => x === "ok")) return;
-
         this.badge.setAttribute("visible", "true");
         this.setConsole("> print(\"Hello World\")\nHello World\n> ¡ÉXITO!\n");
-        this.setHUD("🎉 Nivel completado", "Genial. Siguiente: Nivel 2 (variables) lo armamos después.");
+        this.setHUD("🎉 Nivel completado", "Buen trabajo.\nSiguiente: Nivel 2 (variables).");
       }
     });
   </script>
@@ -341,158 +301,140 @@
 
 <body>
   <a-scene
-    background="color: #0b1020"
-    renderer="antialias:true"
-    webxr="optionalFeatures: hand-tracking, local-floor;"
+    background="color: #061024"
+    renderer="antialias:true; colorManagement:true"
+    webxr="optionalFeatures: local-floor;"
   >
-    <!-- ===== Player Rig (NO lo empujes a z positivo) ===== -->
+    <a-sky color="#071a3a"></a-sky>
+    <a-plane rotation="-90 0 0" width="60" height="60" color="#061024"></a-plane>
+
+    <a-entity light="type: ambient; intensity: 1.2"></a-entity>
+    <a-entity light="type: directional; intensity: 1.4" position="3 6 2"></a-entity>
+
+    <!-- RIG centrado -->
     <a-entity id="rig" position="0 0 0">
       <a-camera id="cam" position="0 1.6 0" look-controls></a-camera>
 
-      <!-- Controllers: rayo largo -->
+      <!-- Usamos laser-controls y escuchamos gripdown/gripup + triggerdown -->
       <a-entity
         laser-controls="hand: right"
-        raycaster="objects: .grabbable, .clickable; far: 10; interval: 50"
-        line="color: #4ade80; opacity: 0.85"
+        raycaster="objects: .grabbable, .clickable; far: 14; interval: 50"
+        line="color: #7dd3fc; opacity: 0.9"
         controller-logic
       ></a-entity>
 
       <a-entity
         laser-controls="hand: left"
-        raycaster="objects: .grabbable, .clickable; far: 10; interval: 50"
-        line="color: #4ade80; opacity: 0.55"
+        raycaster="objects: .grabbable, .clickable; far: 14; interval: 50"
+        line="color: #7dd3fc; opacity: 0.55"
         controller-logic
       ></a-entity>
     </a-entity>
 
-    <!-- ===== Lights ===== -->
-    <a-entity light="type: ambient; intensity: 0.9"></a-entity>
-    <a-entity light="type: directional; intensity: 1.0" position="2 4 2"></a-entity>
-
-    <!-- ===== Floor ===== -->
-    <a-plane rotation="-90 0 0" width="40" height="40" color="#081021"></a-plane>
-
-    <!-- ======================================================
-         HUD (arriba, lejos para que NO tape)
-         ====================================================== -->
-    <a-entity position="0 2.35 -2.2" app-manager>
-      <a-plane width="3.2" height="0.85" color="#111827" opacity="0.92"></a-plane>
-      <a-text id="hudTitle" value="..." position="-1.55 0.22 0.01" width="3.0" color="#93c5fd"></a-text>
-      <a-text id="hudBody" value="..." position="-1.55 -0.05 0.01" width="3.0" color="#e2e8f0" wrap-count="70"></a-text>
+    <!-- HUD arriba centro -->
+    <a-entity position="0 2.35 -2.6" app-manager>
+      <a-plane width="3.6" height="0.95" material="shader: flat; color:#111827; opacity:0.96"></a-plane>
+      <a-text id="hudTitle" value="..." position="-1.75 0.25 0.01" width="3.4" color="#93c5fd"></a-text>
+      <a-text id="hudBody"  value="..." position="-1.75 -0.05 0.01" width="3.4" color="#e2e8f0" wrap-count="75"></a-text>
     </a-entity>
 
-    <!-- ======================================================
-         Consola (abajo derecha, pequeña, NO franja)
-         ====================================================== -->
-    <a-entity position="1.35 1.05 -2.0" rotation="0 -15 0">
-      <a-plane width="1.65" height="0.85" color="#0b1220" opacity="0.95"></a-plane>
-      <a-text value="CONSOLA" position="-0.75 0.32 0.01" width="2.0" color="#93c5fd"></a-text>
-      <a-text id="consoleText" value="> ..." position="-0.75 0.12 0.01" width="1.6" color="#4ade80" wrap-count="40"></a-text>
+    <!-- Consola abajo -->
+    <a-entity position="0 0.95 -2.6">
+      <a-plane width="2.4" height="0.7" material="shader: flat; color:#0b1220; opacity:0.95"></a-plane>
+      <a-text value="CONSOLA" position="-1.12 0.20 0.01" width="2.2" color="#93c5fd"></a-text>
+      <a-text id="consoleText" value="> ..." position="-1.12 -0.02 0.01" width="2.2" color="#4ade80" wrap-count="60"></a-text>
     </a-entity>
 
-    <!-- ======================================================
-         MENÚ
-         ====================================================== -->
-    <a-entity id="groupMenu" position="0 1.55 -1.8">
-      <a-plane width="2.6" height="1.3" color="#111827" opacity="0.95"></a-plane>
-      <a-text value="Misión Código" align="center" position="0 0.35 0.01" width="3.2" color="#e2e8f0" billboard></a-text>
-      <a-text value="Isla de los Algoritmos\n\nPulsa INICIAR"
-              align="center" position="0 0.05 0.01" width="2.4" color="#cbd5e1" wrap-count="40" billboard></a-text>
-
-      <a-plane ui-button="action: start; label: INICIAR"
-               position="0 -0.42 0.02"
-               width="1.1" height="0.32"></a-plane>
+    <!-- MENÚ -->
+    <a-entity id="groupMenu" position="0 1.55 -2.1">
+      <a-plane width="2.8" height="1.35" material="shader: flat; color:#111827; opacity:0.97"></a-plane>
+      <a-text value="CODEA VR" align="center" position="0 0.38 0.01" width="3.2" color="#e2e8f0"></a-text>
+      <a-text value="Pulsa INICIAR" align="center" position="0 0.12 0.01" width="2.6" color="#cbd5e1"></a-text>
+      <a-plane ui-button="action: start; label: INICIAR" position="0 -0.42 0.02" width="1.2" height="0.32"></a-plane>
     </a-entity>
 
-    <!-- ======================================================
-         NIVELES
-         ====================================================== -->
-    <a-entity id="groupLevels" visible="false" position="0 1.55 -1.8">
-      <a-plane width="2.6" height="1.4" color="#111827" opacity="0.95"></a-plane>
-      <a-text value="Niveles" align="center" position="0 0.50 0.01" width="3.0" color="#e2e8f0" billboard></a-text>
-
-      <a-plane ui-button="action: lvl1; label: NIVEL 1"
-               position="0 0.10 0.02" width="1.2" height="0.30"></a-plane>
-
+    <!-- NIVELES -->
+    <a-entity id="groupLevels" visible="false" position="0 1.55 -2.1">
+      <a-plane width="2.8" height="1.45" material="shader: flat; color:#111827; opacity:0.97"></a-plane>
+      <a-text value="NIVELES" align="center" position="0 0.52 0.01" width="3.0" color="#e2e8f0"></a-text>
+      <a-plane ui-button="action: lvl1; label: NIVEL 1" position="0 0.12 0.02" width="1.3" height="0.30"></a-plane>
       <a-plane ui-button="action: backToMenu; label: VOLVER"
-               position="0 -0.30 0.02" width="1.2" height="0.26"
-               material="color:#7f1d1d; opacity:0.95"></a-plane>
+               position="0 -0.30 0.02" width="1.3" height="0.26"
+               material="shader: flat; color:#7f1d1d; opacity:0.98"></a-plane>
     </a-entity>
 
-    <!-- ======================================================
-         NIVEL 1 (Scratch wall ordenado)
-         ====================================================== -->
+    <!-- NIVEL 1: 3 columnas (izq paleta, centro instrucciones, der pizarra) -->
     <a-entity id="groupLevel1" visible="false">
 
-      <!-- Botón salir -->
-      <a-entity position="-1.45 2.35 -2.15">
+      <!-- Centro: instrucciones (separado, no estorba) -->
+      <a-entity position="0 1.55 -2.3">
+        <a-plane width="1.6" height="2.2" material="shader: flat; color:#0f172a; opacity:0.98"></a-plane>
+        <a-text value="INSTRUCCIONES" align="center" position="0 0.95 0.01" width="2.2" color="#e2e8f0"></a-text>
+        <a-text value="1) Agarra con GRIP\n2) Lleva el bloque a la pizarra\n3) Suelta con GRIP\n\nOrden:\nprint(  \"Hello World\"  )"
+                align="center" position="0 0.25 0.01" width="2.0" color="#cbd5e1" wrap-count="28"></a-text>
+
         <a-plane ui-button="action: backToLevels; label: ← SALIR"
-                 width="1.0" height="0.28"
-                 material="color:#7f1d1d; opacity:0.95"></a-plane>
+                 position="0 -0.92 0.02" width="1.1" height="0.28"
+                 material="shader: flat; color:#7f1d1d; opacity:0.98"></a-plane>
       </a-entity>
 
-      <!-- PIZARRA (centro) -->
-      <a-entity position="0 1.55 -2.0">
-        <a-plane width="3.4" height="2.1" color="#0f172a" opacity="0.96"></a-plane>
-        <a-text value="PIZARRA" align="center" position="0 0.95 0.01" width="4" color="#cbd5e1" billboard></a-text>
+      <!-- Izquierda: paleta -->
+      <a-entity position="-2.6 1.55 -2.3">
+        <a-plane width="1.8" height="2.2" material="shader: flat; color:#111827; opacity:0.98"></a-plane>
+        <a-text value="PALETA" align="center" position="0 0.95 0.01" width="2.4" color="#e2e8f0"></a-text>
 
-        <!-- Slots -->
-        <a-entity id="boardSlots" position="0 0.35 0.03">
-          <a-box slot="index: 0" position="-0.95 0.20 0" width="0.95" height="0.25" depth="0.30"
-                 material="color:#334155; opacity:0.78"></a-box>
-          <a-box slot="index: 1" position="0.10 0.20 0" width="1.45" height="0.25" depth="0.30"
-                 material="color:#334155; opacity:0.78"></a-box>
-          <a-box slot="index: 2" position="1.20 0.20 0" width="0.55" height="0.25" depth="0.30"
-                 material="color:#334155; opacity:0.78"></a-box>
-
-          <a-text value="1" position="-1.45 0.20 0.18" width="2" color="#93c5fd"></a-text>
-          <a-text value="2" position="-0.35 0.20 0.18" width="2" color="#93c5fd"></a-text>
-          <a-text value="3" position="0.80 0.20 0.18" width="2" color="#93c5fd"></a-text>
-        </a-entity>
-
-        <a-text id="programLine" value="___ ___ ___" align="center" position="0 -0.55 0.12"
-                width="5" color="#4ade80"></a-text>
-        <a-text id="badge" value="¡LOGRADO!" visible="false" align="center"
-                position="0 0.65 0.12" color="#facc15" width="6"></a-text>
-      </a-entity>
-
-      <!-- PALETA (izquierda) -->
-      <a-entity position="-2.05 1.55 -1.85" rotation="0 18 0">
-        <a-plane width="1.35" height="2.1" color="#111827" opacity="0.96"></a-plane>
-        <a-text value="BLOQUES" align="center" position="0 0.95 0.01" width="2.2" color="#e2e8f0" billboard></a-text>
-        <a-text value="Grip para agarrar" align="center" position="0 0.75 0.01" width="2.2" color="#cbd5e1" billboard></a-text>
-
-        <a-entity id="paletteBlocks" position="0 0.25 0.08">
+        <a-entity id="paletteBlocks" position="0 0.25 0.12">
           <a-entity id="blk_print" class="grabbable" code-block
-            data-text="print(" data-homepos="0 0.35 0"
-            geometry="primitive: box; width: 0.95; height: 0.25; depth: 0.30"
-            material="color:#2563eb; roughness:0.4"
-            position="0 0.35 0"
+            data-text="print(" data-homepos="0 0.45 0"
+            geometry="primitive: box; width: 1.35; height: 0.30; depth: 0.36"
+            material="shader: flat; color:#2563eb"
+            position="0 0.45 0"
           >
-            <a-plane width="0.93" height="0.22" position="0 0 0.155" color="#1e3a8a"></a-plane>
-            <a-text value="print(" align="center" position="0 0 0.17" width="3.0" color="#fff" billboard></a-text>
+            <a-plane width="1.30" height="0.26" position="0 0 0.185" material="shader: flat; color:#1e3a8a"></a-plane>
+            <a-text value="print(" align="center" position="0 0 0.20" width="3.2" color="#fff"></a-text>
           </a-entity>
 
           <a-entity id="blk_text" class="grabbable" code-block
             data-text="&quot;Hello World&quot;" data-homepos="0 0.00 0"
-            geometry="primitive: box; width: 1.20; height: 0.25; depth: 0.30"
-            material="color:#2563eb; roughness:0.4"
+            geometry="primitive: box; width: 1.55; height: 0.30; depth: 0.36"
+            material="shader: flat; color:#2563eb"
             position="0 0.00 0"
           >
-            <a-plane width="1.18" height="0.22" position="0 0 0.155" color="#1e3a8a"></a-plane>
-            <a-text value='"Hello World"' align="center" position="0 0 0.17" width="3.4" color="#fff" billboard></a-text>
+            <a-plane width="1.50" height="0.26" position="0 0 0.185" material="shader: flat; color:#1e3a8a"></a-plane>
+            <a-text value='"Hello World"' align="center" position="0 0 0.20" width="3.4" color="#fff"></a-text>
           </a-entity>
 
           <a-entity id="blk_close" class="grabbable" code-block
-            data-text=")" data-homepos="0 -0.35 0"
-            geometry="primitive: box; width: 0.55; height: 0.25; depth: 0.30"
-            material="color:#2563eb; roughness:0.4"
-            position="0 -0.35 0"
+            data-text=")" data-homepos="0 -0.45 0"
+            geometry="primitive: box; width: 0.85; height: 0.30; depth: 0.36"
+            material="shader: flat; color:#2563eb"
+            position="0 -0.45 0"
           >
-            <a-plane width="0.53" height="0.22" position="0 0 0.155" color="#1e3a8a"></a-plane>
-            <a-text value=")" align="center" position="0 0 0.17" width="3.0" color="#fff" billboard></a-text>
+            <a-plane width="0.80" height="0.26" position="0 0 0.185" material="shader: flat; color:#1e3a8a"></a-plane>
+            <a-text value=")" align="center" position="0 0 0.20" width="3.0" color="#fff"></a-text>
           </a-entity>
         </a-entity>
+      </a-entity>
+
+      <!-- Derecha: pizarra/workspace -->
+      <a-entity position="2.6 1.55 -2.3">
+        <a-plane width="2.6" height="2.2" material="shader: flat; color:#0f172a; opacity:0.98"></a-plane>
+        <a-text value="PIZARRA" align="center" position="0 0.95 0.01" width="3.0" color="#cbd5e1"></a-text>
+
+        <a-entity id="boardSlots" position="0 0.25 0.10">
+          <a-box slot="index: 0" position="-0.85 0.30 0" width="1.05" height="0.30" depth="0.36"></a-box>
+          <a-box slot="index: 1" position="0.35 0.30 0" width="1.55" height="0.30" depth="0.36"></a-box>
+          <a-box slot="index: 2" position="1.25 0.30 0" width="0.65" height="0.30" depth="0.36"></a-box>
+
+          <a-text value="1" position="-1.25 0.30 0.25" width="2" color="#93c5fd"></a-text>
+          <a-text value="2" position="-0.05 0.30 0.25" width="2" color="#93c5fd"></a-text>
+          <a-text value="3" position="0.90 0.30 0.25" width="2" color="#93c5fd"></a-text>
+        </a-entity>
+
+        <a-text id="programLine" value="___ ___ ___" align="center" position="0 -0.40 0.12"
+                width="4.8" color="#4ade80"></a-text>
+        <a-text id="badge" value="¡LOGRADO!" visible="false" align="center"
+                position="0 0.65 0.12" color="#facc15" width="5.2"></a-text>
       </a-entity>
     </a-entity>
   </a-scene>
