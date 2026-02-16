@@ -2,256 +2,314 @@
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <title>CODEA VR - Scratch Layout Pro</title>
+  <title>CODEA VR - Scratch Layout (Funcional)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <script src="https://aframe.io/releases/1.7.1/aframe.min.js"></script>
 
   <script>
+    // =======================
+    // Utils & Haptics
+    // =======================
     const V3 = THREE.Vector3;
 
     function worldPosOf(el) {
       const v = new V3();
-      if (el?.object3D) el.object3D.getWorldPosition(v);
+      if (el && el.object3D) el.object3D.getWorldPosition(v);
       return v;
     }
-    function getText(blockEl) { return blockEl.getAttribute("data-text") || ""; }
-    function climbToAttr(el, attrName, steps = 12) {
+
+    function triggerVibration(controllerEl, intensity = 0.5, duration = 80) {
+      const tc = controllerEl.components['tracked-controls'];
+      const gamepad = tc && tc.controller;
+      if (gamepad && gamepad.hapticActuators && gamepad.hapticActuators.length > 0) {
+        gamepad.hapticActuators[0].pulse(intensity, duration);
+      }
+    }
+
+    function getText(blockEl) {
+      return blockEl.getAttribute("data-text") || "";
+    }
+
+    function climbTo(el, attrName, steps = 12) {
       let cur = el;
-      for (let i=0; i<steps && cur; i++) {
+      for (let i = 0; i < steps && cur; i++) {
         if (cur.hasAttribute && cur.hasAttribute(attrName)) return cur;
         cur = cur.parentElement;
       }
       return null;
     }
-    function triggerVibration(controllerEl, intensity = 0.5, duration = 60) {
-      const tc = controllerEl.components["tracked-controls"];
-      const gamepad = tc && tc.controller;
-      if (gamepad?.hapticActuators?.length) gamepad.hapticActuators[0].pulse(intensity, duration);
-    }
 
+    // =======================
+    // UI Button
+    // =======================
     AFRAME.registerComponent("ui-button", {
-      schema: { action: {type:"string"}, label:{type:"string"} },
+      schema: { action: { type: "string" }, label: { type: "string" } },
       init() {
         this.el.classList.add("clickable");
-        this.el.setAttribute("material","shader:flat; color:#1f2937; opacity:0.98");
-        const t=document.createElement("a-text");
+        this.el.setAttribute("material", "shader: flat; color:#1f2937; opacity:0.98");
+
+        const t = document.createElement("a-text");
         t.setAttribute("value", this.data.label);
-        t.setAttribute("align","center");
-        t.setAttribute("color","#e2e8f0");
-        t.setAttribute("width","2.4");
-        t.setAttribute("position","0 0 0.01");
+        t.setAttribute("align", "center");
+        t.setAttribute("color", "#e2e8f0");
+        t.setAttribute("width", "2.6");
+        t.setAttribute("position", "0 0 0.01");
         this.el.appendChild(t);
 
-        this.el.addEventListener("mouseenter", ()=>this.el.setAttribute("material","shader:flat; color:#334155; opacity:0.98"));
-        this.el.addEventListener("mouseleave", ()=>this.el.setAttribute("material","shader:flat; color:#1f2937; opacity:0.98"));
+        this.el.addEventListener("mouseenter", () => this.el.setAttribute("material", "shader: flat; color:#334155; opacity:0.98"));
+        this.el.addEventListener("mouseleave", () => this.el.setAttribute("material", "shader: flat; color:#1f2937; opacity:0.98"));
       }
     });
 
+    // =======================
+    // Slot (ranura)
+    // =======================
     AFRAME.registerComponent("slot", {
-      schema:{ index:{type:"int"} },
-      init(){
-        this.filled=false;
+      schema: { index: { type: "int" } },
+      init() {
+        this.filled = false;
         this.el.classList.add("clickable");
-        this.el.setAttribute("material","shader:flat; color:#334155; opacity:0.92");
+        this.el.setAttribute("material", "shader: flat; color:#334155; opacity:0.92");
 
-        this.el.addEventListener("mouseenter", ()=>{
-          if (!this.filled) this.el.setAttribute("material","shader:flat; color:#60a5fa; opacity:0.95");
+        this.el.addEventListener("mouseenter", () => {
+          if (!this.filled) this.el.setAttribute("material", "shader: flat; color:#60a5fa; opacity:0.95");
         });
-        this.el.addEventListener("mouseleave", ()=>{
-          if (!this.filled) this.el.setAttribute("material","shader:flat; color:#334155; opacity:0.92");
+        this.el.addEventListener("mouseleave", () => {
+          if (!this.filled) this.el.setAttribute("material", "shader: flat; color:#334155; opacity:0.92");
         });
       }
     });
 
-    // Trigger = botones / Grip = agarrar bloques (gatillos traseros) :contentReference[oaicite:3]{index=3}
+    // =======================
+    // Controller Logic (robusto)
+    // - Botones: trigger o grip (si apuntas al botón)
+    // - Agarre de bloques: trigger o grip
+    // - Soltar: triggerup o gripup
+    // =======================
     AFRAME.registerComponent("controller-logic", {
-      init(){
-        this.grabbed=null;
+      init() {
+        this.grabbed = null;
 
-        this.el.addEventListener("triggerdown", ()=>{
-          const ray=this.el.components.raycaster;
-          if (!ray?.intersections?.length) return;
-          const hit=ray.intersections[0].object.el;
-          const btn=climbToAttr(hit,"ui-button");
-          if (!btn) return;
-          triggerVibration(this.el,0.6,40);
+        const tryClickButton = () => {
+          const ray = this.el.components.raycaster;
+          if (!ray || !ray.intersections || !ray.intersections.length) return false;
+          const hit = ray.intersections[0].object.el;
+          const btn = climbTo(hit, "ui-button");
+          if (!btn) return false;
+          triggerVibration(this.el, 0.75, 45);
           btn.emit("ui-click");
-        });
-
-        this.el.addEventListener("gripdown", ()=>{
-          if (this.grabbed) return;
-          const ray=this.el.components.raycaster;
-          if (!ray?.intersections?.length) return;
-          const hit=ray.intersections[0].object.el;
-          const block=climbToAttr(hit,"code-block");
-          if (!block) return;
-
-          triggerVibration(this.el,0.35,60);
-          this.grabbed=block;
-
-          // attach por object3D (estable)
-          this.el.object3D.add(block.object3D);
-          block.object3D.position.set(0,0,-0.18);
-          block.object3D.rotation.set(0,0,0);
-          block.setAttribute("animation__grab","property:scale; dur:80; to:1.06 1.06 1.06");
-        });
-
-        this.el.addEventListener("gripup", ()=>{
-          if (!this.grabbed) return;
-          const block=this.grabbed;
-          this.grabbed=null;
-
-          const app=document.querySelector("[app-manager]").components["app-manager"];
-          const snapped=app.trySnap(block);
-
-          if (snapped) triggerVibration(this.el,1.0,90);
-          else {
-            const palette=document.querySelector("#paletteBlocks");
-            palette.appendChild(block);
-            block.setAttribute("position", block.getAttribute("data-homepos"));
-            block.setAttribute("rotation","0 0 0");
-            block.setAttribute("material","shader:flat; color:#2563eb");
-          }
-          block.removeAttribute("animation__grab");
-          block.setAttribute("scale","1 1 1");
-        });
-      }
-    });
-
-    AFRAME.registerComponent("app-manager", {
-      init(){
-        this.groups={
-          menu:document.querySelector("#groupMenu"),
-          levels:document.querySelector("#groupLevels"),
-          level1:document.querySelector("#groupLevel1")
+          return true;
         };
 
-        this.hud=document.querySelector("#hudText");
-        this.program=document.querySelector("#programLine");
-        this.console=document.querySelector("#consoleText");
-        this.badge=document.querySelector("#badge");
+        const tryGrabBlock = () => {
+          if (this.grabbed) return false;
+          const ray = this.el.components.raycaster;
+          if (!ray || !ray.intersections || !ray.intersections.length) return false;
 
-        this.expected=['print(', '"Hello World"', ')'];
-        this.state=[null,null,null];
+          const hit = ray.intersections[0].object.el;
+          const b = climbTo(hit, "code-block");
+          if (!b) return false;
 
-        document.querySelectorAll("[ui-button]").forEach(btn=>{
-          btn.addEventListener("ui-click", ()=>this.onUIButton(btn.getAttribute("ui-button").action));
+          triggerVibration(this.el, 0.4, 70);
+          this.grabbed = b;
+
+          // IMPORTANTE: mover como hijo DOM del controller (consistente en A-Frame)
+          this.el.appendChild(b);
+          b.setAttribute("position", "0 0 -0.18");
+          b.setAttribute("rotation", "0 0 0");
+          b.setAttribute("scale", "1.06 1.06 1.06");
+          return true;
+        };
+
+        const dropBlock = () => {
+          if (!this.grabbed) return;
+          const b = this.grabbed;
+          this.grabbed = null;
+
+          b.setAttribute("scale", "1 1 1");
+
+          const app = document.querySelector("[app-manager]").components["app-manager"];
+          const snapped = app.trySnap(b);
+
+          if (snapped) {
+            triggerVibration(this.el, 1.0, 120);
+          } else {
+            const palette = document.querySelector("#paletteBlocks");
+            palette.appendChild(b);
+            b.setAttribute("position", b.getAttribute("data-homepos"));
+            b.setAttribute("rotation", "0 0 0");
+            b.setAttribute("material", "shader: flat; color:#2563eb");
+          }
+        };
+
+        // TRIGGER: si es botón -> click; si no -> agarrar bloque
+        this.el.addEventListener("triggerdown", () => {
+          if (tryClickButton()) return;
+          tryGrabBlock();
+        });
+        this.el.addEventListener("triggerup", () => dropBlock());
+
+        // GRIP: también sirve igual (gatillos traseros)
+        this.el.addEventListener("gripdown", () => {
+          if (tryClickButton()) return;
+          tryGrabBlock();
+        });
+        this.el.addEventListener("gripup", () => dropBlock());
+      }
+    });
+
+    // =======================
+    // App Manager
+    // =======================
+    AFRAME.registerComponent("app-manager", {
+      init() {
+        this.groups = {
+          menu: document.querySelector("#groupMenu"),
+          levels: document.querySelector("#groupLevels"),
+          level1: document.querySelector("#groupLevel1")
+        };
+
+        this.hud = document.querySelector("#hudText");
+        this.console = document.querySelector("#consoleText");
+        this.program = document.querySelector("#programLine");
+        this.badge = document.querySelector("#badge");
+
+        this.expected = ['print(', '"Hello World"', ')'];
+        this.state = [null, null, null];
+
+        document.querySelectorAll("[ui-button]").forEach(btn => {
+          btn.addEventListener("ui-click", () => this.onUIButton(btn.getAttribute("ui-button").action));
         });
 
         this.show("menu");
-        this.setHUD("Pulsa INICIAR (y luego Enter VR en Quest).");
+        this.setHUD("Pulsa INICIAR. En Quest: Enter VR.\n\nAgarra con TRIGGER o GRIP.");
         this.setConsole("> Listo.\n");
         this.renderProgram();
       },
 
-      show(name){
-        Object.entries(this.groups).forEach(([k,el])=>el.setAttribute("visible", k===name));
+      show(name) {
+        Object.entries(this.groups).forEach(([k, el]) => el.setAttribute("visible", k === name));
       },
 
-      setHUD(msg){ this.hud.setAttribute("text","value", msg); },
-      setConsole(v){ this.console.setAttribute("text","value", v); },
+      setHUD(msg) { this.hud.setAttribute("text", "value", msg); },
+      setConsole(v) { this.console.setAttribute("text", "value", v); },
 
-      onUIButton(action){
-        if (action==="start") { this.show("levels"); this.setHUD("Elige Nivel 1."); }
-        if (action==="backToMenu") { this.show("menu"); this.setHUD("Pulsa INICIAR."); }
-        if (action==="lvl1") { this.resetLevel1(); this.show("level1"); this.setHUD("Nivel 1: Arrastra IZQ → DER con GRIP."); }
-        if (action==="backToLevels") { this.show("levels"); this.setHUD("Elige Nivel 1."); }
+      onUIButton(action) {
+        if (action === "start") {
+          this.show("levels");
+          this.setHUD("Elige Nivel 1.");
+        }
+        if (action === "backToMenu") {
+          this.show("menu");
+          this.setHUD("Pulsa INICIAR.");
+        }
+        if (action === "lvl1") {
+          this.resetLevel1();
+          this.show("level1");
+          this.setHUD("Nivel 1:\nArrastra IZQUIERDA → DERECHA.\nOrden: print( \"Hello World\" )");
+        }
+        if (action === "backToLevels") {
+          this.show("levels");
+          this.setHUD("Elige Nivel 1.");
+        }
       },
 
-      resetLevel1(){
-        this.state=[null,null,null];
-        this.badge.setAttribute("visible","false");
+      resetLevel1() {
+        this.state = [null, null, null];
+        this.badge.setAttribute("visible", "false");
         this.setConsole("> Nivel 1 listo.\n");
 
-        document.querySelectorAll("#boardSlots [slot]").forEach(s=>{
-          s.components.slot.filled=false;
-          s.setAttribute("material","shader:flat; color:#334155; opacity:0.92");
+        document.querySelectorAll("#boardSlots [slot]").forEach(s => {
+          s.components.slot.filled = false;
+          s.setAttribute("material", "shader: flat; color:#334155; opacity:0.92");
         });
 
-        const palette=document.querySelector("#paletteBlocks");
-        ["blk_print","blk_text","blk_close"].forEach(id=>{
-          const b=document.querySelector("#"+id);
+        const palette = document.querySelector("#paletteBlocks");
+        ["blk_print", "blk_text", "blk_close"].forEach(id => {
+          const b = document.querySelector("#" + id);
           palette.appendChild(b);
           b.setAttribute("position", b.getAttribute("data-homepos"));
-          b.setAttribute("rotation","0 0 0");
-          b.setAttribute("material","shader:flat; color:#2563eb");
-          b.setAttribute("scale","1 1 1");
+          b.setAttribute("rotation", "0 0 0");
+          b.setAttribute("material", "shader: flat; color:#2563eb");
+          b.setAttribute("scale", "1 1 1");
         });
 
         this.renderProgram();
       },
 
-      renderProgram(){
-        const slots=Array.from(document.querySelectorAll("#boardSlots [slot]"));
-        const parts=[0,1,2].map(i=>{
-          const s=slots.find(x=>x.getAttribute("slot").index===i);
-          const child=s ? s.querySelector("[code-block]") : null;
+      renderProgram() {
+        const slots = Array.from(document.querySelectorAll("#boardSlots [slot]"));
+        const parts = [0, 1, 2].map(i => {
+          const s = slots.find(x => x.getAttribute("slot").index === i);
+          const child = s ? s.querySelector("[code-block]") : null;
           return child ? getText(child) : "___";
         });
-        this.program.setAttribute("text","value", parts.join(" "));
+        this.program.setAttribute("text", "value", parts.join(" "));
       },
 
-      trySnap(blockEl){
+      trySnap(blockEl) {
         if (!this.groups.level1.getAttribute("visible")) return false;
 
-        const slots=Array.from(document.querySelectorAll("#boardSlots [slot]"));
-        const p=worldPosOf(blockEl);
+        const slots = Array.from(document.querySelectorAll("#boardSlots [slot]"));
+        const p = worldPosOf(blockEl);
 
-        let best=null, bestD=999;
-        for (const s of slots){
+        let best = null, bestD = 999;
+        for (const s of slots) {
           if (s.components.slot.filled) continue;
-          const d=worldPosOf(s).distanceTo(p);
-          if (d<bestD){ bestD=d; best=s; }
+          const d = worldPosOf(s).distanceTo(p);
+          if (d < bestD) { bestD = d; best = s; }
         }
 
-        if (!best || bestD>0.65) return false; // snap fácil
+        // Snap fácil
+        if (!best || bestD > 0.70) return false;
 
-        const idx=best.getAttribute("slot").index;
+        const idx = best.getAttribute("slot").index;
+
         best.appendChild(blockEl);
-        blockEl.setAttribute("position","0 0 0.18");
-        blockEl.setAttribute("rotation","0 0 0");
-        best.components.slot.filled=true;
+        blockEl.setAttribute("position", "0 0 0.18");
+        blockEl.setAttribute("rotation", "0 0 0");
+        best.components.slot.filled = true;
 
-        const ok=(getText(blockEl)===this.expected[idx]);
-        if (ok){
-          blockEl.setAttribute("material","shader:flat; color:#22c55e");
-          best.setAttribute("material","shader:flat; color:#16a34a; opacity:0.96");
-          this.state[idx]="ok";
+        const ok = (getText(blockEl) === this.expected[idx]);
+        if (ok) {
+          blockEl.setAttribute("material", "shader: flat; color:#22c55e");
+          best.setAttribute("material", "shader: flat; color:#16a34a; opacity:0.96");
+          this.state[idx] = "ok";
           this.checkWin();
         } else {
-          blockEl.setAttribute("material","shader:flat; color:#ef4444");
-          best.setAttribute("material","shader:flat; color:#ef4444; opacity:0.96");
-          setTimeout(()=>this.resetSlot(idx), 850);
+          blockEl.setAttribute("material", "shader: flat; color:#ef4444");
+          best.setAttribute("material", "shader: flat; color:#ef4444; opacity:0.96");
+          setTimeout(() => this.resetSlot(idx), 850);
         }
 
         this.renderProgram();
         return true;
       },
 
-      resetSlot(idx){
-        const slots=Array.from(document.querySelectorAll("#boardSlots [slot]"));
-        const s=slots.find(x=>x.getAttribute("slot").index===idx);
-        const b=s ? s.querySelector("[code-block]") : null;
+      resetSlot(idx) {
+        const slots = Array.from(document.querySelectorAll("#boardSlots [slot]"));
+        const s = slots.find(x => x.getAttribute("slot").index === idx);
+        const b = s ? s.querySelector("[code-block]") : null;
         if (!b) return;
 
-        s.components.slot.filled=false;
-        s.setAttribute("material","shader:flat; color:#334155; opacity:0.92");
-        this.state[idx]=null;
+        s.components.slot.filled = false;
+        s.setAttribute("material", "shader: flat; color:#334155; opacity:0.92");
+        this.state[idx] = null;
 
-        const palette=document.querySelector("#paletteBlocks");
+        const palette = document.querySelector("#paletteBlocks");
         palette.appendChild(b);
         b.setAttribute("position", b.getAttribute("data-homepos"));
-        b.setAttribute("rotation","0 0 0");
-        b.setAttribute("material","shader:flat; color:#2563eb");
+        b.setAttribute("rotation", "0 0 0");
+        b.setAttribute("material", "shader: flat; color:#2563eb");
 
         this.renderProgram();
       },
 
-      checkWin(){
-        if (!this.state.every(x=>x==="ok")) return;
-        this.badge.setAttribute("visible","true");
+      checkWin() {
+        if (!this.state.every(x => x === "ok")) return;
+        this.badge.setAttribute("visible", "true");
         this.setConsole("> print(\"Hello World\")\nHello World\n> ¡ÉXITO!\n");
-        this.setHUD("¡Nivel completado! (Siguiente: variables)");
+        this.setHUD("¡Nivel completado!");
       }
     });
   </script>
@@ -264,7 +322,7 @@
     <a-entity light="type: ambient; intensity: 1.3"></a-entity>
     <a-entity light="type: directional; intensity: 1.5" position="4 8 3"></a-entity>
 
-    <!-- RIG centrado -->
+    <!-- RIG -->
     <a-entity id="rig" position="0 0 0">
       <a-camera id="cam" position="0 1.6 0" look-controls></a-camera>
 
@@ -277,7 +335,7 @@
         line="color:#7dd3fc; opacity:0.55" controller-logic></a-entity>
     </a-entity>
 
-    <!-- HUD superior -->
+    <!-- HUD -->
     <a-entity position="0 2.35 -2.7" app-manager>
       <a-plane width="3.8" height="0.85" material="shader:flat; color:#111827; opacity:0.96"></a-plane>
       <a-text id="hudText" value="..." position="0 0 0.01" align="center" width="3.6" color="#e2e8f0" wrap-count="70"></a-text>
@@ -308,7 +366,7 @@
     <!-- LEVEL 1 (3 columnas separadas) -->
     <a-entity id="groupLevel1" visible="false">
 
-      <!-- IZQUIERDA: Paleta (rotada hacia centro) -->
+      <!-- IZQUIERDA: Paleta -->
       <a-entity position="-3.2 1.55 -3.0" rotation="0 18 0">
         <a-plane width="2.0" height="2.3" material="shader:flat; color:#111827; opacity:0.98"></a-plane>
         <a-text value="PALETA" align="center" position="0 1.00 0.01" width="2.4" color="#e2e8f0"></a-text>
@@ -338,13 +396,13 @@
       <a-entity position="0 1.55 -3.0">
         <a-plane width="2.0" height="2.3" material="shader:flat; color:#0f172a; opacity:0.98"></a-plane>
         <a-text value="INSTRUCCIONES" align="center" position="0 1.00 0.01" width="2.6" color="#e2e8f0"></a-text>
-        <a-text value="1) GRIP para agarrar\n2) Lleva el bloque a la pizarra\n3) Suelta con GRIP\n\nOrden:\nprint(  \"Hello World\"  )"
+        <a-text value="1) Apunta al bloque\n2) Presiona TRIGGER o GRIP\n3) Lleva a la PIZARRA\n4) Suelta\n\nOrden:\nprint( \"Hello World\" )"
           align="center" position="0 0.20 0.01" width="2.0" color="#cbd5e1" wrap-count="26"></a-text>
         <a-plane ui-button="action:backToLevels; label: ← SALIR" position="0 -1.02 0.02"
           width="1.2" height="0.28" material="shader:flat; color:#7f1d1d; opacity:0.98"></a-plane>
       </a-entity>
 
-      <!-- DERECHA: Pizarra (rotada hacia centro) -->
+      <!-- DERECHA: Pizarra -->
       <a-entity position="3.2 1.55 -3.0" rotation="0 -18 0">
         <a-plane width="2.6" height="2.3" material="shader:flat; color:#0f172a; opacity:0.98"></a-plane>
         <a-text value="PIZARRA" align="center" position="0 1.00 0.01" width="2.8" color="#cbd5e1"></a-text>
